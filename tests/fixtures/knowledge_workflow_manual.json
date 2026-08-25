@@ -1,0 +1,51 @@
+{
+  "collection_id": "manuals",
+  "external_id": "equipment-handbook",
+  "title": "Representative equipment handbook",
+  "page_count": 8,
+  "recognized_section_count": 3,
+  "recognized_table_count": 1,
+  "recognized_figure_count": 2,
+  "expected_error_codes": ["101", "102", "190"],
+  "segments": [
+    {
+      "text": "Unstructured front matter explains that maintenance records can repeat information found later in the handbook.",
+      "page": 1
+    },
+    {
+      "text": "Preventive maintenance starts with a visual inspection and a controller self-test.",
+      "page": 2,
+      "section_path": ["Maintenance"],
+      "section_ref": "#/sections/maintenance"
+    },
+    {
+      "text": "Power module maintenance covers charging, storage, inspection, and replacement. The enclosure must remain dry. This intentionally long passage repeats the operating context so canonical ingestion must divide prose without overlap while search remains free to derive overlapping retrieval chunks. Power module maintenance covers charging, storage, inspection, and replacement. The enclosure must remain dry. This intentionally long passage repeats the operating context so canonical ingestion must divide prose without overlap while search remains free to derive overlapping retrieval chunks. Power module maintenance covers charging, storage, inspection, and replacement. The enclosure must remain dry. This intentionally long passage repeats the operating context so canonical ingestion must divide prose without overlap while search remains free to derive overlapping retrieval chunks. Power module maintenance covers charging, storage, inspection, and replacement. The enclosure must remain dry.",
+      "page": 3,
+      "page_end": 4,
+      "section_path": ["Maintenance", "Power module"],
+      "section_ref": "#/sections/maintenance/power-module"
+    },
+    {
+      "text": "| Code | Condition | Action |\n| --- | --- | --- |\n| 101 | Power module voltage is below the safe operating threshold after the controller self-test has completed. | Recharge the module, repeat the complete self-test, and replace it if the condition remains active. |\n| 102 | Power module temperature is above the safe charging threshold after an extended operating cycle. | Disconnect the charger, allow the module to cool, and inspect the cooling path before retrying. |\n| 190 | Communication with the controller was interrupted during the full startup sequence. | Inspect the connector and cable, reseat both ends, and repeat startup before replacing either component. |\n| 101 | Power module voltage is below the safe operating threshold; this duplicate summary is printed in the quick-reference row. | Follow the detailed code 101 procedure and record the final measured voltage in the maintenance log. |\n| 102 | Power module temperature remains high while external power is connected to the unit. | Verify ambient temperature and charger output before returning the unit to service. |\n| 190 | Controller communication was restored but the startup history still contains the earlier interruption. | Clear the history only after confirming a complete successful startup and preserving the service record. |",
+      "page": 4,
+      "page_end": 5,
+      "section_path": ["Maintenance", "Power module"],
+      "section_ref": "#/sections/maintenance/power-module",
+      "is_table": true,
+      "table_ref": "#/tables/power-module-diagnostics",
+      "caption": "Power module diagnostic codes"
+    },
+    {
+      "text": "Diagnostic code 101 is also described in prose: low power module voltage requires a recharge and a repeated self-test. This is supporting evidence, not a distinct diagnostic code.",
+      "page": 6,
+      "section_path": ["Maintenance", "Power module"],
+      "section_ref": "#/sections/maintenance/power-module"
+    },
+    {
+      "text": "The appendix records connector locations and revision notes for the controller and power module.",
+      "page": 8,
+      "section_path": ["Appendix"],
+      "section_ref": "#/sections/appendix"
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+#!/bin/sh
+# Guards the configuration artifacts that are derived from app/config.py during commit
+#
+# Enable once per clone:
+#
+#   git config core.hooksPath .githooks
+
+
+set -e
+
+WATCHED='^(app/config\.py|seshat\.example\.toml|\.env\.example|compose\.yaml|docs/configuration\.md|scripts/generate_config_reference\.py|tests/unit/test_config_files\.py)$'
+
+if ! git diff --cached --name-only | grep -qE "$WATCHED"; then
+    exit 0
+fi
+
+if ! command -v uv >/dev/null 2>&1; then
+    echo "pre-commit: uv not found; skipping configuration parity checks." >&2
+    exit 0
+fi
+
+echo "pre-commit: checking configuration parity..."
+if uv run --quiet pytest tests/unit/test_config_files.py -q >/tmp/seshat-parity.$$ 2>&1; then
+    rm -f /tmp/seshat-parity.$$
+    exit 0
+fi
+
+cat /tmp/seshat-parity.$$ >&2
+rm -f /tmp/seshat-parity.$$
+cat >&2 <<'MSG'
+
+pre-commit: the configuration artifacts are out of step with app/config.py.
+
+  docs/configuration.md stale   ->  python scripts/generate_config_reference.py
+  a setting missing from the
+  example, .env.example, or
+  compose.yaml                  ->  see CONTRIBUTING.md "Configuration"
+
+Commit again once the suite passes, or use --no-verify to skip this check.
+MSG
+exit 1

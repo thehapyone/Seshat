@@ -1,0 +1,4 @@
+interface:
+  display_name: "Seshat Knowledge"
+  short_description: "Run or integrate Seshat for document retrieval"
+  default_prompt: "Use $seshat-knowledge to run or connect to Seshat, process sources, and retrieve cited evidence."
