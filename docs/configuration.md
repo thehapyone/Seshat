@@ -22,8 +22,8 @@ Start from [`seshat.example.toml`](../seshat.example.toml).
 | `retrieval.mode` | `"hybrid"` | `hybrid` combines vector and keyword search; `vector` uses vector search alone. |
 | `retrieval.default_top_k` | `8` | Results returned when a search omits `top_k`. |
 | `retrieval.max_top_k` | `50` | Largest `top_k` a search may request. Must be at least `retrieval.default_top_k`. |
-| `scan.default_limit` | `25` | Canonical blocks returned when a scan omits `limit`. |
-| `scan.max_limit` | `100` | Largest canonical-block count accepted for one scan page. |
+| `scan.default_limit` | `25` | Passage items returned when a scan omits `limit`. |
+| `scan.max_limit` | `100` | Largest passage-item count accepted for one scan page. |
 | `scan.max_payload_bytes` | `256000` | Largest aggregate UTF-8 text payload returned by one scan page. |
 | `limits.max_document_bytes` | `8000000` | Largest extracted text accepted from one document. |
 | `limits.max_canonical_block_bytes` | `64000` | Largest rendered canonical block accepted during ingestion. |

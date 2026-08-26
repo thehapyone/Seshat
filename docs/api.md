@@ -83,12 +83,14 @@ only between rows and repeats its header. Search may overlap split passages, whi
 scan passages never overlap.
 
 The first scan request supplies `collection_id`, `external_id`, an optional
-outline `section_ref`, and an optional `limit`. Continue with `next_cursor` and
-the same scope until it is `null`; only then is the selected scope complete.
+outline `section_ref`, and an optional `limit`. The limit is the maximum number
+of passage items returned in that response. The payload bound may produce fewer
+items with a continuation cursor. Continue with `next_cursor` and the same scope
+until it is `null`; only then is the selected scope complete.
 
 Scan items contain complete passage text with available section and page
 provenance. A passage spanning sections uses page provenance without claiming a
-single section. Pages obey source-block and payload limits; content is deferred,
+single section. Pages obey passage-count and payload limits; content is deferred,
 never truncated. Internal identifiers are not returned.
 
 Knowledge errors use a machine-readable `detail.code`:

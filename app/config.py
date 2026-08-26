@@ -211,7 +211,7 @@ SETTINGS: tuple[Setting, ...] = (
         default=25,
         minimum=1,
         maximum=200,
-        purpose="Canonical blocks returned when a scan omits `limit`.",
+        purpose="Passage items returned when a scan omits `limit`.",
     ),
     Setting(
         attribute="max_scan_limit",
@@ -220,7 +220,7 @@ SETTINGS: tuple[Setting, ...] = (
         default=100,
         minimum=1,
         maximum=200,
-        purpose="Largest canonical-block count accepted for one scan page.",
+        purpose="Largest passage-item count accepted for one scan page.",
     ),
     Setting(
         attribute="max_scan_payload_bytes",

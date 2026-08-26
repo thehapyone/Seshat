@@ -186,7 +186,11 @@ class ScanRequest(BaseModel):
     collection_id: CollectionId
     external_id: ExternalId
     section_ref: SectionReference | None = None
-    limit: int | None = Field(default=None, ge=1)
+    limit: int | None = Field(
+        default=None,
+        ge=1,
+        description="Maximum number of passage items returned in this response.",
+    )
     cursor: str | None = Field(default=None, min_length=1, max_length=4096)
 
 

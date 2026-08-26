@@ -243,10 +243,12 @@ curl -sS -X POST "$SESHAT_URL/v1/scan" \
 Each item is a substantive passage assembled from adjacent paragraphs, headings,
 and tables in source order. A passage can cross recognized section boundaries;
 in that case it carries page bounds without a `section_ref`. Process each
-response's ordered `items`, retain only the caller state required for the task,
-and repeat with `next_cursor` in the same source and optional section scope.
-Traversal is complete only when `next_cursor` is `null`. On `source_changed`,
-discard the partial traversal and restart.
+response's ordered `items`; `limit` is the maximum number of items in that
+response, though the payload bound can return fewer with a continuation cursor.
+Retain only the caller state required for the task and repeat with `next_cursor`
+in the same source and optional section scope. Traversal is complete only when
+`next_cursor` is `null`. On `source_changed`, discard the partial traversal and
+restart.
 
 Knowledge errors use a machine-readable code:
 

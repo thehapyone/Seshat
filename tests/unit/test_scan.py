@@ -1,6 +1,7 @@
 """Canonical scans: scope, pagination, bounds, and cursor invalidation."""
 
 import hashlib
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -167,6 +168,53 @@ async def test_whole_source_scan_returns_all_content_once_in_packed_passages(
         assert EXTERNAL_ID not in cursor
 
     assert "\n\n".join(returned) == "\n\n".join(texts)
+
+
+async def test_scan_limit_counts_returned_passages(
+    client: AsyncClient,
+    repository: InMemoryRepository,
+) -> None:
+    texts = [f"Block {ordinal}: " + "word " * 50 for ordinal in range(6)]
+    seed_source(
+        repository,
+        tuple(
+            CanonicalBlock(ordinal=ordinal, kind="text", text=text)
+            for ordinal, text in enumerate(texts)
+        ),
+    )
+
+    first = await scan(
+        client,
+        {
+            "collection_id": COLLECTION,
+            "external_id": EXTERNAL_ID,
+            "limit": 2,
+        },
+    )
+
+    first.raise_for_status()
+    first_body = first.json()
+    assert len(first_body["items"]) == 2
+    assert first_body["items"][0]["text"] == f"{texts[0]}\n\n{texts[1]}"
+    assert first_body["items"][1]["text"] == f"{texts[2]}\n\n{texts[3]}"
+    assert first_body["next_cursor"] is not None
+
+    second = await scan(
+        client,
+        {
+            "collection_id": COLLECTION,
+            "external_id": EXTERNAL_ID,
+            "limit": 2,
+            "cursor": first_body["next_cursor"],
+        },
+    )
+
+    second.raise_for_status()
+    second_body = second.json()
+    assert [item["text"] for item in second_body["items"]] == [
+        f"{texts[4]}\n\n{texts[5]}"
+    ]
+    assert second_body["next_cursor"] is None
 
 
 async def test_section_scan_includes_its_nested_subsections(
@@ -370,6 +418,50 @@ async def test_scan_payload_bound_defers_whole_blocks(
     assert second.json()["next_cursor"] is None
 
 
+async def test_scan_byte_bound_splits_a_token_small_passage_between_blocks(
+    client: AsyncClient,
+    repository: InMemoryRepository,
+) -> None:
+    client.app.state.settings = replace(client.app.state.settings, chunk_size=8_192)
+    block_texts = ["=" * 60_000 for _ in range(5)]
+    seed_source(
+        repository,
+        tuple(
+            CanonicalBlock(ordinal=index, kind="text", text=text)
+            for index, text in enumerate(block_texts)
+        ),
+    )
+
+    first = await scan(
+        client,
+        {
+            "collection_id": COLLECTION,
+            "external_id": EXTERNAL_ID,
+            "limit": 1,
+        },
+    )
+
+    first.raise_for_status()
+    body = first.json()
+    assert len(body["items"]) == 1
+    assert len(body["items"][0]["text"].encode("utf-8")) <= 256_000
+    assert body["items"][0]["text"] == "\n\n".join(block_texts[:4])
+    assert body["next_cursor"] is not None
+
+    second = await scan(
+        client,
+        {
+            "collection_id": COLLECTION,
+            "external_id": EXTERNAL_ID,
+            "limit": 1,
+            "cursor": body["next_cursor"],
+        },
+    )
+    second.raise_for_status()
+    assert [item["text"] for item in second.json()["items"]] == [block_texts[4]]
+    assert second.json()["next_cursor"] is None
+
+
 async def test_cursor_tampering_and_scope_reuse_fail_closed(
     client: AsyncClient,
     repository: InMemoryRepository,
@@ -377,8 +469,8 @@ async def test_cursor_tampering_and_scope_reuse_fail_closed(
     seed_source(
         repository,
         (
-            CanonicalBlock(ordinal=0, kind="text", text="First"),
-            CanonicalBlock(ordinal=1, kind="text", text="Second"),
+            CanonicalBlock(ordinal=0, kind="text", text="First " * 500),
+            CanonicalBlock(ordinal=1, kind="text", text="Second " * 500),
         ),
     )
     first = await scan(
@@ -426,13 +518,13 @@ async def test_section_cursor_requires_the_same_section_scope(
             CanonicalBlock(
                 ordinal=0,
                 kind="text",
-                text="First",
+                text="First " * 500,
                 section_path=("Maintenance",),
             ),
             CanonicalBlock(
                 ordinal=1,
                 kind="text",
-                text="Second",
+                text="Second " * 500,
                 section_path=("Maintenance",),
             ),
         ),
@@ -507,8 +599,8 @@ async def test_replacement_invalidates_cursor_even_when_source_bytes_match(
     seed_source(
         repository,
         (
-            CanonicalBlock(ordinal=0, kind="text", text="First"),
-            CanonicalBlock(ordinal=1, kind="text", text="Second"),
+            CanonicalBlock(ordinal=0, kind="text", text="First " * 500),
+            CanonicalBlock(ordinal=1, kind="text", text="Second " * 500),
         ),
         checksum=checksum,
     )

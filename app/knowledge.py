@@ -74,45 +74,60 @@ async def scan_source(
             "The scan cursor does not match the request scope."
         )
 
-    record = await repository.get_document_scan(
-        request.collection_id,
-        request.external_id,
-        section_ref=request.section_ref,
-        after_ordinal=cursor.after_ordinal if cursor is not None else None,
-        expected_source_marker=cursor.source_marker if cursor is not None else None,
-        limit=limit,
-    )
-    if record is None:
-        return None
+    after_ordinal = cursor.after_ordinal if cursor is not None else None
+    expected_source_marker = cursor.source_marker if cursor is not None else None
+    blocks: list[DocumentBlock] = []
 
-    section_by_id = {section.section_id: section for section in record.sections}
-    selected_blocks: list[DocumentBlock] = []
-    payload_bytes = 0
-    for block in record.blocks:
-        text = block.rendered_text
-        block_bytes = len(text.encode("utf-8"))
-        separator_bytes = 2 if selected_blocks else 0
-        if (
-            selected_blocks
-            and payload_bytes + separator_bytes + block_bytes
-            > settings.max_scan_payload_bytes
-        ):
+    while True:
+        record = await repository.get_document_scan(
+            request.collection_id,
+            request.external_id,
+            section_ref=request.section_ref,
+            after_ordinal=after_ordinal,
+            expected_source_marker=expected_source_marker,
+            limit=settings.max_scan_limit,
+        )
+        if record is None:
+            return None
+
+        blocks.extend(record.blocks)
+        groups = passage_groups(
+            blocks,
+            text_of=lambda block: block.rendered_text,
+            target_tokens=settings.chunk_size,
+            max_bytes=settings.max_scan_payload_bytes,
+        )
+        finalized_groups = groups if not record.has_more else groups[:-1]
+        selected_groups, payload_full = _select_scan_groups(
+            finalized_groups,
+            limit=limit,
+            max_payload_bytes=settings.max_scan_payload_bytes,
+        )
+        if len(selected_groups) == limit or payload_full or not record.has_more:
             break
-        if block_bytes > settings.max_scan_payload_bytes:
-            raise RuntimeError("A canonical block exceeds the scan payload limit.")
-        selected_blocks.append(block)
-        payload_bytes += separator_bytes + block_bytes
 
-    groups = passage_groups(
-        selected_blocks,
-        text_of=lambda block: block.rendered_text,
-        target_tokens=settings.chunk_size,
-    )
+        after_ordinal = record.blocks[-1].ordinal
+        revision_id = record.document.current_revision_id
+        if revision_id is None:
+            raise RuntimeError("A current document must have a revision.")
+        expected_source_marker = source_revision_marker(
+            record.document.checksum, revision_id
+        )
+
+    if not record.has_more:
+        selected_groups, _ = _select_scan_groups(
+            groups,
+            limit=limit,
+            max_payload_bytes=settings.max_scan_payload_bytes,
+        )
+
+    selected_blocks = [block for group in selected_groups for block in group]
+    section_by_id = {section.section_id: section for section in record.sections}
     items = [
-        _scan_item(record.document, group, section_by_id) for group in groups
+        _scan_item(record.document, group, section_by_id) for group in selected_groups
     ]
 
-    has_more = record.has_more or len(selected_blocks) < len(record.blocks)
+    has_more = record.has_more or len(selected_blocks) < len(blocks)
     next_cursor = None
     if has_more:
         if not items:
@@ -137,6 +152,27 @@ async def scan_source(
         items=items,
         next_cursor=next_cursor,
     )
+
+
+def _select_scan_groups(
+    groups: list[tuple[DocumentBlock, ...]],
+    *,
+    limit: int,
+    max_payload_bytes: int,
+) -> tuple[list[tuple[DocumentBlock, ...]], bool]:
+    """Select complete passages within the public item and payload limits."""
+    selected: list[tuple[DocumentBlock, ...]] = []
+    payload_bytes = 0
+    for group in groups[:limit]:
+        text = "\n\n".join(block.rendered_text for block in group)
+        item_bytes = len(text.encode("utf-8"))
+        if item_bytes > max_payload_bytes:
+            raise RuntimeError("A scan passage exceeds the scan payload limit.")
+        if selected and payload_bytes + item_bytes > max_payload_bytes:
+            return selected, True
+        selected.append(group)
+        payload_bytes += item_bytes
+    return selected, False
 
 
 def _section_reference(document: DocumentRecord, section: DocumentSection) -> str:
