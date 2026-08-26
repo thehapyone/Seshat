@@ -60,28 +60,36 @@ References change when source content is replaced.
 | Method | Path         | Purpose                                                  |
 | ------ | ------------ | -------------------------------------------------------- |
 | `POST` | `/v1/search` | Retrieve ranked passages from explicit collections.      |
-| `POST` | `/v1/scan`   | Traverse every canonical block in one source or section. |
+| `POST` | `/v1/scan`   | Traverse ordered source passages in one source or section. |
 
 Search requires `query` and `collection_ids`. Optional `top_k` limits results;
 `filters` supports `source_type`, `external_id`, `exclude_external_id`, and
 `updated_after`.
 
-Each result includes text, score, caller-owned source identity, metadata, and
-citations. When available, citations carry `section_ref`, `section_path`, and
-page bounds. Use `section_ref` with the result's collection and external IDs to
-scan that section. Responses never expose internal identifiers.
+Each result includes passage text, score, caller-owned collection and source
+identity, and available page and section location. Use `section_ref` with the
+result's collection and external IDs to scan that section. Empty optional fields
+are omitted, and responses never expose internal identifiers or repeat document
+management metadata. `page_end` appears only when a passage spans pages.
 
 Use search when ranked relevance is sufficient. Use scan when the caller must
-inspect every block in a source or an outline-selected section; scan has no query
+inspect all content in a source or an outline-selected section; scan has no query
 or relevance filtering.
+
+Search and scan passages pack adjacent source content around the configured token
+target. Paragraphs, headings, tables, and section transitions remain in source
+order. A table that fits stays with its surrounding text; a larger table is split
+only between rows and repeats its header. Search may overlap split passages, while
+scan passages never overlap.
 
 The first scan request supplies `collection_id`, `external_id`, an optional
 outline `section_ref`, and an optional `limit`. Continue with `next_cursor` and
 the same scope until it is `null`; only then is the selected scope complete.
 
-Scan items contain complete canonical text with available section and page
-provenance. Pages obey item and payload limits; blocks are deferred, never
-truncated. Internal identifiers are not returned.
+Scan items contain complete passage text with available section and page
+provenance. A passage spanning sections uses page provenance without claiming a
+single section. Pages obey source-block and payload limits; content is deferred,
+never truncated. Internal identifiers are not returned.
 
 Knowledge errors use a machine-readable `detail.code`:
 

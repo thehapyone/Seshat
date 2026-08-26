@@ -309,66 +309,87 @@ def test_search_chunks_record_their_contributing_canonical_ordinal() -> None:
     assert {tuple(chunk.metadata["block_ordinals"]) for chunk in chunks} == {(7,)}
 
 
-def test_search_overlap_bridges_adjacent_canonical_blocks_in_the_same_section() -> None:
-    source = "x" * 63_991 + " battery management"
-    blocks = build_canonical_blocks(
+def test_search_packs_paragraphs_and_tables_across_section_boundaries() -> None:
+    chunks = StructuralChunker(chunk_size=800, chunk_overlap=120)(
         [
-            DocumentSegment(
-                text=source,
-                section_path=("Manual", "Maintenance"),
-                section_ref="#/groups/maintenance",
-            )
-        ],
-        max_rendered_bytes=64_000,
-    )
-    nodes = [
-        node(
-            block.text,
-            section="Maintenance",
-            section_path=list(block.section_path),
-            source_section_ref=block.source_section_ref,
-            block_ordinals=[block.ordinal],
-            page=block.ordinal + 1,
-        )
-        for block in blocks
-    ]
-
-    chunks = StructuralChunker(chunk_size=800, chunk_overlap=120)(nodes)
-    bridges = [
-        chunk
-        for chunk in chunks
-        if chunk.metadata["block_ordinals"] == [0, 1]
-    ]
-
-    assert len(bridges) == 1
-    assert bridges[0].metadata["page_end"] == 2
-    assert "page_end" not in bridges[0].get_content(metadata_mode=MetadataMode.EMBED)
-    assert "battery management" in bridges[0].get_content(
-        metadata_mode=MetadataMode.NONE
+            node(
+                "Technical error code",
+                section="Technical error code",
+                section_path=["Technical error code"],
+                section_id="section-errors",
+                block_ordinals=[0],
+                page=149,
+                page_end=149,
+            ),
+            node(
+                "| Code | Meaning |\n| --- | --- |\n| 81 | Replace the flow sensor. |",
+                is_table=True,
+                section="Technical error code",
+                section_path=["Technical error code"],
+                section_id="section-errors",
+                block_ordinals=[1],
+                page=149,
+                page_end=149,
+            ),
+            node(
+                "Verify the repair with the checkout procedure.",
+                section="Verification",
+                section_path=["Verification"],
+                section_id="section-verification",
+                block_ordinals=[2],
+                page=150,
+                page_end=150,
+            ),
+        ]
     )
 
+    assert len(chunks) == 1
+    passage = chunks[0]
+    text = passage.get_content(metadata_mode=MetadataMode.NONE)
+    assert "Technical error code\n\n| Code | Meaning |" in text
+    assert "| 81 | Replace the flow sensor. |" in text
+    assert text.endswith("Verify the repair with the checkout procedure.")
+    assert passage.metadata["block_ordinals"] == [0, 1, 2]
+    assert passage.metadata["page"] == 149
+    assert passage.metadata["page_end"] == 150
+    assert "section_id" not in passage.metadata
+    assert "section_path" not in passage.metadata
 
-def test_search_overlap_does_not_cross_a_recognized_section_boundary() -> None:
-    left = node(
-        "battery ",
-        section="Battery",
-        section_path=["Manual", "Battery"],
-        source_section_ref="#/groups/battery",
-        block_ordinals=[0],
-    )
-    right = node(
-        "management",
-        section="Management",
-        section_path=["Manual", "Management"],
-        source_section_ref="#/groups/management",
-        block_ordinals=[1],
+
+def test_search_keeps_provenance_when_a_passage_stays_in_one_section() -> None:
+    chunks = StructuralChunker(chunk_size=64, chunk_overlap=8)(
+        [
+            node(
+                "Inspect the battery housing.",
+                section="Battery",
+                section_path=["Manual", "Battery"],
+                section_id="section-battery",
+                block_ordinals=[0],
+            ),
+            node(
+                "Replace any damaged connector.",
+                section="Battery",
+                section_path=["Manual", "Battery"],
+                section_id="section-battery",
+                block_ordinals=[1],
+            ),
+        ]
     )
 
-    chunks = StructuralChunker(chunk_size=64, chunk_overlap=8)([left, right])
+    assert len(chunks) == 1
+    assert chunks[0].metadata["block_ordinals"] == [0, 1]
+    assert chunks[0].metadata["section_id"] == "section-battery"
+    assert chunks[0].metadata["section_path"] == ["Manual", "Battery"]
 
-    assert all(chunk.metadata["block_ordinals"] != [0, 1] for chunk in chunks)
-    assert all(
-        "battery management"
-        not in chunk.get_content(metadata_mode=MetadataMode.NONE)
-        for chunk in chunks
+
+def test_search_does_not_leave_a_short_heading_before_a_split_table() -> None:
+    chunks = StructuralChunker(chunk_size=64, chunk_overlap=8)(
+        [
+            node("Technical error code", block_ordinals=[0]),
+            node(TABLE, is_table=True, block_ordinals=[1]),
+        ]
     )
+
+    first = chunks[0].get_content(metadata_mode=MetadataMode.NONE)
+    assert "Technical error code\n\n| Diagnostic | Cause | Action |" in first
+    assert all(not text.endswith("\nTechnical error code") for text in contents(chunks))

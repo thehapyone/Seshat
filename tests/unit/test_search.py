@@ -1,4 +1,4 @@
-"""Search: collection isolation, filtering, citations, and bounds."""
+"""Search: collection isolation, filtering, provenance, and bounds."""
 
 import json
 from uuid import uuid4
@@ -155,7 +155,7 @@ async def test_search_drops_a_staged_revision_even_if_the_backend_returns_it(
     assert all("private replacement" not in item["text"] for item in result["items"])
 
 
-async def test_unchanged_content_refreshes_search_metadata_without_reembedding(
+async def test_unchanged_content_refreshes_search_provenance_without_reembedding(
     client: AsyncClient,
     repository: InMemoryRepository,
     vector_store: RecordingVectorStore,
@@ -195,15 +195,9 @@ async def test_unchanged_content_refreshes_search_metadata_without_reembedding(
     assert repeated["unchanged"] is True
     assert set(vector_store.nodes) == node_ids
     assert result["items"][0]["title"] == "Current title"
-    assert result["items"][0]["source_uri"] == "https://example.test/current"
     assert result["items"][0]["page"] == 7
-    assert result["items"][0]["section"] == "Current section"
-    assert result["items"][0]["citations"][0]["page"] == 7
-    assert result["items"][0]["citations"][0]["section"] == "Current section"
-    assert result["items"][0]["metadata"]["audience"] == "current"
-    assert result["items"][0]["text"] == (
-        "[Current title > Current section - page 7]\n" + EXAMPLE_TEXT
-    )
+    assert result["items"][0]["section_path"] == ["Current section"]
+    assert result["items"][0]["text"] == EXAMPLE_TEXT
     assert "Old title" not in result["items"][0]["text"]
     blocks = await repository.list_document_blocks(
         "example-collection", "example-manual"
@@ -225,7 +219,7 @@ async def test_search_requires_at_least_one_collection(client: AsyncClient) -> N
     assert response.status_code == 422
 
 
-async def test_results_carry_document_metadata_and_citations(
+async def test_results_return_only_passage_identity_and_location(
     client: AsyncClient,
 ) -> None:
     await seed_two_collections(client)
@@ -236,24 +230,23 @@ async def test_results_carry_document_metadata_and_citations(
     )
     item = result["items"][0]
 
+    assert set(item) == {
+        "text",
+        "score",
+        "collection_id",
+        "external_id",
+        "title",
+        "page",
+        "section_path",
+    }
+    assert item["text"] == EXAMPLE_TEXT
     assert item["external_id"] == "example-manual"
     assert item["title"] == "Example service manual"
-    assert item["source_type"] == "manual"
-    assert item["source_uri"] == "file:///data/example-manual.txt"
     assert item["page"] == 151
-    assert item["section"] == "6.5.2 Pre-use check"
-    assert "document_id" not in item
-    assert "chunk_id" not in item
-    assert item["section_ref"] is None
-    assert item["section_path"] is None
-    assert item["updated_at"]
-    citation = item["citations"][0]
-    assert citation["label"] == "Example service manual"
-    assert citation["locator"] == "section:6.5.2 Pre-use check"
-    assert citation["page"] == 151
+    assert item["section_path"] == ["6.5.2 Pre-use check"]
 
 
-async def test_unlocated_result_cites_only_its_source(client: AsyncClient) -> None:
+async def test_unlocated_result_omits_empty_location_fields(client: AsyncClient) -> None:
     await ingest(
         client,
         {
@@ -269,15 +262,8 @@ async def test_unlocated_result_cites_only_its_source(client: AsyncClient) -> No
     )
 
     item = result["items"][0]
-    citation = item["citations"][0]
-    assert citation["label"] == "field-notes"
-    assert citation["locator"] is None
-    assert citation["page"] is None
-    assert citation["section"] is None
-    assert citation["section_ref"] is None
-    assert citation["section_path"] is None
-    assert "document_id" not in item
-    assert "chunk_id" not in item
+    assert set(item) == {"text", "score", "collection_id", "external_id"}
+    assert item["external_id"] == "field-notes"
 
 
 async def test_search_section_reference_opens_the_same_scan_scope(
@@ -286,16 +272,18 @@ async def test_search_section_reference_opens_the_same_scan_scope(
     repository: InMemoryRepository,
     vector_store: RecordingVectorStore,
 ) -> None:
+    battery_text = "Battery replacement procedure. " * 50
+    valve_text = "Valve inspection procedure. " * 50
     converter.segments = [
         DocumentSegment(
-            text="Battery replacement procedure.",
+            text=battery_text,
             page=4,
             page_end=5,
             section_path=("Maintenance", "Battery"),
             section_ref="#/groups/battery",
         ),
         DocumentSegment(
-            text="Valve inspection procedure.",
+            text=valve_text,
             page=8,
             section_path=("Maintenance", "Valve"),
             section_ref="#/groups/valve",
@@ -316,14 +304,10 @@ async def test_search_section_reference_opens_the_same_scan_scope(
         for result_item in result["items"]
         if "Battery replacement" in result_item["text"]
     )
-    citation = item["citations"][0]
-
     assert item["section_path"] == ["Maintenance", "Battery"]
     assert item["page"] == 4
     assert item["page_end"] == 5
-    assert citation["section_ref"] == item["section_ref"]
-    assert citation["section_path"] == item["section_path"]
-    assert citation["page_end"] == 5
+    assert item["section_ref"].startswith("sec_")
 
     serialized = json.dumps(result)
     document = repository.documents[("example-collection", "structured-manual")]
@@ -346,8 +330,42 @@ async def test_search_section_reference_opens_the_same_scan_scope(
     )
     scanned.raise_for_status()
     assert [block["text"] for block in scanned.json()["items"]] == [
-        "Battery replacement procedure."
+        battery_text.strip()
     ]
+
+
+async def test_search_returns_one_substantive_passage_across_converter_fragments(
+    client: AsyncClient,
+    converter: RecordingConverter,
+) -> None:
+    converter.segments = [
+        DocumentSegment(text="Technical error code", page=149),
+        DocumentSegment(
+            text="| Code | Meaning |\n| --- | --- |\n| 81 | Replace the flow sensor. |",
+            page=149,
+            is_table=True,
+            table_ref="#/tables/81",
+        ),
+        DocumentSegment(
+            text="Verify the repair with the complete checkout procedure.", page=150
+        ),
+    ]
+    await upload_pdf(client, external_id="error-code-manual")
+
+    result = await search(
+        client,
+        {
+            "query": "technical error code 81",
+            "collection_ids": ["example-collection"],
+            "filters": {"external_id": ["error-code-manual"]},
+        },
+    )
+
+    assert len(result["items"]) == 1
+    text = result["items"][0]["text"]
+    assert "Technical error code\n\n| Code | Meaning |" in text
+    assert "| 81 | Replace the flow sensor. |" in text
+    assert text.endswith("Verify the repair with the complete checkout procedure.")
 
 
 async def test_filters_narrow_results_within_a_collection(client: AsyncClient) -> None:
@@ -362,12 +380,6 @@ async def test_filters_narrow_results_within_a_collection(client: AsyncClient) -
         },
     )
 
-    everything = await search(
-        client,
-        {"query": "pressure sensor alarm", "collection_ids": ["example-collection"]},
-    )
-    assert {item["source_type"] for item in everything["items"]} == {"manual", "note"}
-
     notes = await search(
         client,
         {
@@ -376,7 +388,7 @@ async def test_filters_narrow_results_within_a_collection(client: AsyncClient) -
             "filters": {"source_type": ["note"]},
         },
     )
-    assert {item["source_type"] for item in notes["items"]} == {"note"}
+    assert {item["external_id"] for item in notes["items"]} == {"release-note"}
 
     by_document = await search(
         client,
@@ -399,14 +411,12 @@ async def test_filters_narrow_results_within_a_collection(client: AsyncClient) -
     assert {item["external_id"] for item in without_legacy["items"]} == {"release-note"}
 
 
-async def test_empty_results_report_a_warning(client: AsyncClient) -> None:
+async def test_empty_results_are_an_empty_item_list(client: AsyncClient) -> None:
     result = await search(
         client, {"query": "pressure sensor", "collection_ids": ["example-collection"]}
     )
 
-    assert result["items"] == []
-    assert result["warnings"] == ["no_results"]
-    assert result["stats"]["returned"] == 0
+    assert result == {"items": []}
 
 
 async def test_top_k_is_bounded_by_configuration(client: AsyncClient) -> None:

@@ -12,7 +12,7 @@ extraction, comparison, counting, and final answers.
 Seshat can:
 
 - ingest and retain text, PDF, Office, HTML, and Markdown sources;
-- return ranked passages and citations; and
+- return ranked passages with source and location provenance; and
 - expose recognized structure or scan source content deterministically.
 
 It does not crawl remote systems, reason over evidence, or produce answers.
@@ -149,7 +149,7 @@ First read `GET /v1/documents/source` for the metadata:
 
 Search is ranked and incomplete. Increasing `top_k` does not establish
 coverage. Outline reports converter-recognized facts only. Use scan when the
-task requires every canonical block.
+task requires all content in source order.
 
 ## Search focused evidence
 
@@ -168,8 +168,9 @@ curl -sS -X POST "$SESHAT_URL/v1/search" \
   }'
 ```
 
-Retain citations with the candidate passages. A result's `section_ref` can
-scope a later scan; an absent result does not prove absent source content.
+Retain source and location fields with each candidate passage. A result's
+`section_ref` can scope a later scan; an absent result does not prove absent
+source content.
 
 ```json
 {
@@ -181,15 +182,8 @@ scope a later scan; an absent result does not prove absent source content.
     "title": "Equipment handbook",
     "page": 2,
     "section_ref": "sec_Fl0pT0PxOYcdY1qRoKDNw5iv",
-    "section_path": ["Diagnostics", "Codes"],
-    "citations": [{
-      "label": "Equipment handbook",
-      "page": 2,
-      "section_ref": "sec_Fl0pT0PxOYcdY1qRoKDNw5iv"
-    }]
-  }],
-  "warnings": [],
-  "stats": {"retrieved": 8, "returned": 1}
+    "section_path": ["Diagnostics", "Codes"]
+  }]
 }
 ```
 
@@ -246,10 +240,13 @@ curl -sS -X POST "$SESHAT_URL/v1/scan" \
 }
 ```
 
-Process each response's ordered `items`, retain only the caller state required
-for the task, and repeat with `next_cursor` in the same source and optional
-section scope. Traversal is complete only when `next_cursor` is `null`. On
-`source_changed`, discard the partial traversal and restart.
+Each item is a substantive passage assembled from adjacent paragraphs, headings,
+and tables in source order. A passage can cross recognized section boundaries;
+in that case it carries page bounds without a `section_ref`. Process each
+response's ordered `items`, retain only the caller state required for the task,
+and repeat with `next_cursor` in the same source and optional section scope.
+Traversal is complete only when `next_cursor` is `null`. On `source_changed`,
+discard the partial traversal and restart.
 
 Knowledge errors use a machine-readable code:
 

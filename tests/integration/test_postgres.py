@@ -160,8 +160,6 @@ async def test_two_collections_stay_isolated_in_postgres(
     assert result.items
     assert {item.collection_id for item in result.items} == {"example-collection"}
     assert all("backup unit" not in item.text.lower() for item in result.items)
-    assert all(item.citations for item in result.items)
-    assert all(item.citations[0].locator is None for item in result.items)
     assert all("document_id" not in item.model_dump() for item in result.items)
     assert all("chunk_id" not in item.model_dump() for item in result.items)
 
@@ -929,5 +927,5 @@ async def test_a_preview_and_page_reach_round_trip_through_postgres(stack) -> No
     assert listed[external_id].page_count == 17
     assert listed[external_id].preview_available is True
 
-    # The provenance reached the indexed chunks, which is what citations read back.
+    # The provenance reached the indexed chunks, which search reads back.
     assert latest is not None and latest.status == "completed"

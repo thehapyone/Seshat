@@ -18,7 +18,7 @@ dimension = 1536
 # batch_size = 64
 
 [chunking]
-# Tokens. overlap must be smaller than size.
+# Passage tokens. overlap applies when oversized content is split and must be smaller than size.
 # size = 800
 # overlap = 120
 

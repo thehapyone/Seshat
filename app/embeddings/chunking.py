@@ -1,7 +1,7 @@
 """Chunking that keeps a document's structure retrievable."""
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
@@ -17,6 +17,7 @@ from llama_index.core.utils import get_tokenizer
 from app.models import SEARCH_CONTEXT_METADATA_KEY
 from app.parsing.errors import DocumentTooLargeError
 from app.parsing.segments import DocumentSegment
+from app.passages import passage_groups
 from app.search_text import context_header
 
 TABLE_METADATA_KEYS = ("table_part", "table_parts", "table_ref", "table_header")
@@ -237,13 +238,12 @@ def split_table(table: str, *, budget: int, tokenizer: Any) -> list[str]:
 
 
 class StructuralChunker(TransformComponent):
-    """Split located segments into chunks that can still be found.
+    """Assemble located source blocks into substantive search passages.
 
     A segment the converter identified as a table is kept whole when it fits and
-    split on row boundaries when it does not. Everything else is delegated to the
-    sentence splitter unchanged. Adjacent canonical prose blocks in the same
-    section also produce one bounded bridge chunk so retrieval overlap survives
-    the non-overlapping canonical boundary.
+    split on row boundaries when it does not. Oversized prose is split on sentence
+    boundaries. The resulting pieces are packed in source order across paragraph,
+    table, and section boundaries so converter fragments are not indexed alone.
     """
 
     chunk_size: int
@@ -266,48 +266,13 @@ class StructuralChunker(TransformComponent):
         return "StructuralChunker"
 
     def __call__(self, nodes: Sequence[BaseNode], **kwargs: Any) -> list[BaseNode]:
-        chunks: list[BaseNode] = []
-        for index, node in enumerate(nodes):
-            chunks.extend(self._split_node(node))
-            if index + 1 < len(nodes):
-                bridge = self._boundary_chunk(node, nodes[index + 1])
-                if bridge is not None:
-                    chunks.append(bridge)
-        return chunks
-
-    def _boundary_chunk(self, left: BaseNode, right: BaseNode) -> TextNode | None:
-        """Project retrieval overlap across one canonical prose boundary."""
-        ordinals = _adjacent_prose_ordinals(left, right)
-        if ordinals is None or self.chunk_overlap == 0:
-            return None
-
-        left_text = left.get_content(metadata_mode=MetadataMode.NONE)
-        right_text = right.get_content(metadata_mode=MetadataMode.NONE)
-        if not left_text.strip() or not right_text.strip():
-            return None
-
-        tokenizer = get_tokenizer()
-        left_budget = min(self.chunk_overlap, self.chunk_size - 1)
-        right_budget = self.chunk_size - left_budget
-        left_edge = _token_bounded_edge(
-            left_text, budget=left_budget, tokenizer=tokenizer, from_end=True
+        pieces = [piece for node in nodes for piece in self._split_node(node)]
+        groups = passage_groups(
+            pieces,
+            text_of=lambda piece: piece.get_content(metadata_mode=MetadataMode.NONE),
+            target_tokens=self.chunk_size,
         )
-        right_edge = _token_bounded_edge(
-            right_text, budget=right_budget, tokenizer=tokenizer, from_end=False
-        )
-        if not left_edge or not right_edge:
-            return None
-
-        chunk = _derived(left, f"{left_edge}{right_edge}")
-        chunk.metadata["block_ordinals"] = list(ordinals)
-        right_page_end = right.metadata.get("page_end", right.metadata.get("page"))
-        if isinstance(right_page_end, int) and not isinstance(right_page_end, bool):
-            chunk.metadata["page_end"] = right_page_end
-        _apply_context(chunk)
-        _exclude_metadata(
-            chunk, ("block_ordinals", "page_end", SEARCH_CONTEXT_METADATA_KEY)
-        )
-        return chunk
+        return [_passage(group) for group in groups]
 
     def _split_node(self, node: BaseNode) -> list[BaseNode]:
         text = node.get_content(metadata_mode=MetadataMode.NONE)
@@ -320,8 +285,6 @@ class StructuralChunker(TransformComponent):
         else:
             chunks = list(self.splitter([node]))
 
-        for chunk in chunks:
-            _apply_context(chunk)
         return chunks
 
     def _table_chunks(
@@ -364,37 +327,6 @@ def _derived(node: BaseNode, text: str) -> TextNode:
     return chunk
 
 
-def _adjacent_prose_ordinals(left: BaseNode, right: BaseNode) -> tuple[int, int] | None:
-    """Return adjacent canonical ordinals when a prose boundary may be bridged."""
-    if left.metadata.get("is_table") or right.metadata.get("is_table"):
-        return None
-    if left.metadata.get("document_id") != right.metadata.get("document_id"):
-        return None
-    if _section_identity(left) != _section_identity(right):
-        return None
-
-    left_ordinals = left.metadata.get("block_ordinals")
-    right_ordinals = right.metadata.get("block_ordinals")
-    if not (
-        isinstance(left_ordinals, list)
-        and len(left_ordinals) == 1
-        and isinstance(right_ordinals, list)
-        and len(right_ordinals) == 1
-    ):
-        return None
-    left_ordinal = left_ordinals[0]
-    right_ordinal = right_ordinals[0]
-    if (
-        not isinstance(left_ordinal, int)
-        or isinstance(left_ordinal, bool)
-        or not isinstance(right_ordinal, int)
-        or isinstance(right_ordinal, bool)
-        or right_ordinal != left_ordinal + 1
-    ):
-        return None
-    return left_ordinal, right_ordinal
-
-
 def _section_identity(node: BaseNode) -> tuple[tuple[str, ...], str | None, str]:
     raw_path = node.metadata.get("section_path")
     path = (
@@ -408,29 +340,55 @@ def _section_identity(node: BaseNode) -> tuple[tuple[str, ...], str | None, str]
     return path, section_ref, section
 
 
-def _token_bounded_edge(
-    text: str,
-    *,
-    budget: int,
-    tokenizer: Callable[[str], Sequence[object]],
-    from_end: bool,
-) -> str:
-    """Return the largest prefix or suffix that fits the token budget."""
-    if budget < 1:
-        return ""
-    if len(tokenizer(text)) <= budget:
-        return text
+def _passage(parts: tuple[BaseNode, ...]) -> TextNode:
+    text = "\n\n".join(
+        part.get_content(metadata_mode=MetadataMode.NONE) for part in parts
+    )
+    passage = _derived(parts[0], text)
+    ordinals = list(
+        dict.fromkeys(
+            ordinal
+            for part in parts
+            for ordinal in part.metadata.get("block_ordinals", ())
+        )
+    )
+    passage.metadata["block_ordinals"] = ordinals
 
-    low = 0
-    high = len(text)
-    while low < high:
-        length = (low + high + 1) // 2
-        candidate = text[-length:] if from_end else text[:length]
-        if len(tokenizer(candidate)) <= budget:
-            low = length
-        else:
-            high = length - 1
-    return text[-low:] if from_end and low else text[:low]
+    pages = [
+        page
+        for part in parts
+        for page in (
+            part.metadata.get("page"),
+            part.metadata.get("page_end"),
+        )
+        if isinstance(page, int) and not isinstance(page, bool)
+    ]
+    if pages:
+        passage.metadata["page"] = min(pages)
+        passage.metadata["page_end"] = max(pages)
+
+    if len({_section_identity(part) for part in parts}) > 1:
+        for key in ("section_id", "section", "section_path", "source_section_ref"):
+            passage.metadata.pop(key, None)
+    if len(parts) > 1:
+        for key in (*TABLE_METADATA_KEYS, "is_table", "caption"):
+            passage.metadata.pop(key, None)
+
+    _exclude_metadata(
+        passage,
+        (
+            "block_ordinals",
+            "page",
+            "page_end",
+            "section_id",
+            "section",
+            "section_path",
+            "source_section_ref",
+            SEARCH_CONTEXT_METADATA_KEY,
+        ),
+    )
+    _apply_context(passage)
+    return passage
 
 
 def _apply_context(chunk: BaseNode) -> None:

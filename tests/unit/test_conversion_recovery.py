@@ -162,7 +162,7 @@ async def test_the_converter_task_is_recorded_before_any_polling(
     assert (await settle(client, str(job_id)))["status"] == "completed"
 
 
-async def test_page_and_heading_citations_survive_the_async_path(
+async def test_cross_section_passage_keeps_its_page_range_on_the_async_path(
     client: AsyncClient,
     async_converter: RecordingAsyncConverter,
     vector_store: RecordingVectorStore,
@@ -172,12 +172,11 @@ async def test_page_and_heading_citations_survive_the_async_path(
     job = await settle(client, (await upload(client, **PDF)).json()["job_id"])
     assert job["status"] == "completed"
 
-    located = {
-        (node.metadata.get("page"), node.metadata.get("section"))
-        for node in vector_store.nodes.values()
-    }
-    assert (4, "1 Preventive maintenance") in located
-    assert (17, "2 Alarms") in located
+    assert len(vector_store.nodes) == 1
+    indexed = next(iter(vector_store.nodes.values()))
+    assert indexed.metadata["page"] == 4
+    assert indexed.metadata["page_end"] == 17
+    assert "section" not in indexed.metadata
 
     found = await client.post(
         "/v1/search",
@@ -186,8 +185,8 @@ async def test_page_and_heading_citations_survive_the_async_path(
     )
     top = found.json()["items"][0]
     assert top["page"] == 4
-    assert top["section"] == "1 Preventive maintenance"
-    assert top["citations"][0]["page"] == 4
+    assert top["page_end"] == 17
+    assert "section_path" not in top
     assert (await sources(client))[0]["page_count"] == 17
 
 

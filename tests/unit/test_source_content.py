@@ -601,7 +601,7 @@ async def test_a_source_without_a_preview_reports_it_rather_than_guessing(
     assert "preview" in missing.json()["detail"]
 
 
-async def test_page_provenance_reaches_the_indexed_chunks(
+async def test_cross_section_passage_keeps_page_provenance_and_source_structure(
     client: AsyncClient,
     converter: RecordingConverter,
     repository: InMemoryRepository,
@@ -621,11 +621,11 @@ async def test_page_provenance_reaches_the_indexed_chunks(
     )
     await settle(client, accepted)
 
-    located = {
-        (node.metadata.get("page"), node.metadata.get("section"))
-        for node in vector_store.nodes.values()
-    }
-    assert located == {(4, "2 Maintenance"), (17, "3 Alarms")}
+    assert len(vector_store.nodes) == 1
+    indexed = next(iter(vector_store.nodes.values()))
+    assert indexed.metadata["page"] == 4
+    assert indexed.metadata["page_end"] == 17
+    assert "section" not in indexed.metadata
     external_id = accepted.json()["external_id"]
     sections = await repository.list_document_sections(COLLECTION, external_id)
     blocks = await repository.list_document_blocks(COLLECTION, external_id)

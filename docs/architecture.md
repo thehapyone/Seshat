@@ -32,24 +32,26 @@ Intelligence instead; the Docling container is then unnecessary.
    to the configured converter, which returns text and available page, heading,
    and table context.
 4. Seshat builds bounded, ordered, non-overlapping canonical blocks and a section
-   hierarchy, then derives overlapping search chunks and embeddings from them.
+   hierarchy, then packs adjacent blocks into substantive search passages and
+   embeddings.
 5. After validating the staged representation, one PostgreSQL transaction swaps
    the current document metadata, source pointer, sections, blocks, and search
    projection. Failed replacements leave the prior revision untouched.
 6. A client either searches explicit collection IDs for ranked passages or reads
-   one current source through its structural outline and ordered canonical blocks.
-   Search results carry the same public section references used by section scans,
-   while internal document, section, revision, and search-chunk IDs stay private.
+   one current source through its structural outline and ordered scan passages.
+   Search results contained within one section carry the same public section
+   reference used by section scans. Passages spanning sections retain page ranges
+   without claiming one section, while internal identifiers stay private.
 
 `collection_id` is the data-isolation boundary. Seshat applies the collection
 filter during retrieval and checks every returned chunk before responding.
 
 The calling agent owns the workflow around these read paths. Search ranks likely
 evidence but does not prove coverage. Outline reports only structure established
-by normalization. Scan provides deterministic source coverage, but it does not
-extract records, compare them, deduplicate them, or summarize them. A caller that
-needs an exhaustive result must retain its own state and continue scanning until
-the response carries `next_cursor: null`.
+by normalization. Scan provides deterministic, non-overlapping source coverage,
+but it does not extract records, compare them, deduplicate them, or summarize
+them. A caller that needs an exhaustive result must retain its own state and
+continue scanning until the response carries `next_cursor: null`.
 
 ## Asynchronous Conversion
 
@@ -59,8 +61,9 @@ Seshat submits work to the configured converter and polls for the result; it
 never waits for conversion inside the upload request.
 
 The converter supplies document structure, including page, heading, and table
-facts. Seshat uses those facts to build canonical blocks, then applies its own
-central chunking policy for embeddings. It never infers structure from text.
+facts. Seshat uses those facts to build canonical blocks, then applies one
+passage-size policy to search and scan. Passage assembly may cross recognized
+section boundaries, but it never infers structure from text.
 
 ## Sources and Connectors
 

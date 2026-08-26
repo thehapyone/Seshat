@@ -714,7 +714,12 @@ def _api_router() -> APIRouter:
             )
         return JobResponse(**asdict(job))
 
-    @router.post("/search", response_model=SearchResponse, tags=["search"])
+    @router.post(
+        "/search",
+        response_model=SearchResponse,
+        response_model_exclude_none=True,
+        tags=["search"],
+    )
     async def search(payload: SearchRequest, request: Request) -> SearchResponse:
         runtime = _runtime(request)
         settings: Settings = request.app.state.settings

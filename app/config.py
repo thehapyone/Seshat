@@ -166,7 +166,7 @@ SETTINGS: tuple[Setting, ...] = (
         default=800,
         minimum=64,
         maximum=8192,
-        purpose="Target chunk size in tokens.",
+        purpose="Target search and scan passage size in tokens.",
     ),
     Setting(
         attribute="chunk_overlap",
@@ -175,7 +175,7 @@ SETTINGS: tuple[Setting, ...] = (
         default=120,
         minimum=0,
         maximum=4096,
-        purpose="Tokens shared between neighboring chunks. Must be smaller than `chunking.size`.",
+        purpose="Tokens shared between splits of oversized content. Must be smaller than `chunking.size`.",
     ),
     Setting(
         attribute="retrieval_mode",

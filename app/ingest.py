@@ -858,15 +858,21 @@ def _validate_search_projection(
         ):
             raise RuntimeError("A search chunk has invalid canonical block provenance.")
         section_ids = {block_by_ordinal[ordinal].section_id for ordinal in ordinals}
-        section_id = next(iter(section_ids)) if len(section_ids) == 1 else None
-        section = section_by_id.get(section_id) if section_id is not None else None
-        if (
-            section is None
-            or metadata.get("section_id") != str(section.section_id)
-            or metadata.get("section_path") != list(section.path)
+        if len(section_ids) == 1:
+            section = section_by_id[next(iter(section_ids))]
+            if (
+                metadata.get("section_id") != str(section.section_id)
+                or metadata.get("section_path") != list(section.path)
+            ):
+                raise RuntimeError(
+                    "A search chunk does not match its canonical block section."
+                )
+        elif any(
+            metadata.get(key)
+            for key in ("section_id", "section", "section_path", "source_section_ref")
         ):
             raise RuntimeError(
-                "A search chunk does not match its canonical block section."
+                "A cross-section search chunk must not claim one section."
             )
         covered.update(ordinals)
     if covered != available:

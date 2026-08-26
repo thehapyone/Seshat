@@ -1,4 +1,4 @@
-"""Hybrid retrieval with mandatory collection isolation and citations."""
+"""Hybrid retrieval with mandatory collection isolation and provenance."""
 
 import hashlib
 import inspect
@@ -21,17 +21,14 @@ from llama_index.core.vector_stores.types import (
 from app.config import Settings
 from app.log import logger
 from app.models import (
-    RESERVED_METADATA_KEYS,
     SEARCH_CONTEXT_METADATA_KEY,
-    Citation,
     SearchRequest,
     SearchResponse,
     SearchResultItem,
-    SearchStats,
 )
 from app.references import section_reference
 from app.repository import DocumentRecord, Repository
-from app.search_text import contextual_search_text, search_body
+from app.search_text import search_body
 
 
 async def search_documents(
@@ -58,11 +55,7 @@ async def search_documents(
         if document.current_revision_id is not None
     }
     if not current_by_revision:
-        return SearchResponse(
-            items=[],
-            warnings=["no_results"],
-            stats=SearchStats(retrieved=0, returned=0),
-        )
+        return SearchResponse(items=[])
 
     index = VectorStoreIndex.from_vector_store(vector_store, embed_model=embed_model)
     retriever = _build_retriever(
@@ -92,21 +85,13 @@ async def search_documents(
         _build_item(nws, current_by_revision[str(nws.node.metadata["revision_id"])])
         for nws in nodes
     ]
-    warnings: list[str] = []
-    if not items:
-        warnings.append("no_results")
-
     logger.info(
         "Search over %s returned %d of %d retrieved chunk(s)",
         ",".join(allowed),
         len(items),
         retrieved,
     )
-    return SearchResponse(
-        items=items,
-        warnings=warnings,
-        stats=SearchStats(retrieved=retrieved, returned=len(items)),
-    )
+    return SearchResponse(items=items)
 
 
 def _build_metadata_filters(
@@ -225,101 +210,29 @@ def _dedupe(nodes: Iterable[Any]) -> list[Any]:
 
 def _build_item(nws: Any, document: DocumentRecord) -> SearchResultItem:
     metadata = dict(nws.node.metadata)
-    metadata.update(document.metadata)
-    metadata.update(
-        {
-            "collection_id": document.collection_id,
-            "document_id": str(document.document_id),
-            "external_id": document.external_id,
-            "title": document.title,
-            "source_type": document.source_type,
-            "source_uri": document.source_uri,
-            "version": document.version,
-            "checksum": document.checksum,
-            "updated_at": document.updated_at,
-            "updated_at_ts": (
-                int(document.updated_at.timestamp()) if document.updated_at else None
-            ),
-        }
-    )
     if document.provenance_mode == "document":
         metadata["page"] = document.page
         metadata["section"] = document.section
     score = float(nws.score or 0.0)
     page = _page_number(metadata.get("page"))
     page_end = _page_number(metadata.get("page_end"))
-    section = _optional_str(metadata.get("section"))
     public_section_ref, section_path = _public_section_provenance(metadata, document)
+    if section_path is None and document.provenance_mode == "document":
+        section_path = [document.section] if document.section else None
     stored_text = nws.node.get_content()
     stored_context = nws.node.metadata.get(SEARCH_CONTEXT_METADATA_KEY)
     body = search_body(
         stored_text, stored_context if isinstance(stored_context, str) else ""
     )
-    text = contextual_search_text(metadata, body)
     return SearchResultItem(
-        text=text,
+        text=body,
         score=score,
-        retrieval_score=score,
-        collection_id=str(metadata.get("collection_id", "")),
-        external_id=_optional_str(metadata.get("external_id")),
-        title=_optional_str(metadata.get("title")),
-        source_type=_optional_str(metadata.get("source_type")),
-        source_uri=_optional_str(metadata.get("source_uri")),
-        version=_optional_str(metadata.get("version")),
-        checksum=_optional_str(metadata.get("checksum")),
+        collection_id=document.collection_id,
+        external_id=document.external_id,
+        title=document.title or None,
         page=page,
-        page_end=page_end,
-        section=section,
+        page_end=page_end if page_end != page else None,
         section_ref=public_section_ref,
-        section_path=section_path,
-        updated_at=_parse_updated_at(metadata),
-        metadata={
-            key: value
-            for key, value in metadata.items()
-            if key not in RESERVED_METADATA_KEYS
-        },
-        citations=[
-            _build_citation(
-                metadata,
-                page=page,
-                page_end=page_end,
-                section=section,
-                section_ref=public_section_ref,
-                section_path=section_path,
-            )
-        ],
-    )
-
-
-def _build_citation(
-    metadata: dict[str, Any],
-    *,
-    page: int | None,
-    page_end: int | None,
-    section: str | None,
-    section_ref: str | None,
-    section_path: list[str] | None,
-) -> Citation:
-    label = (
-        _optional_str(metadata.get("title"))
-        or _optional_str(metadata.get("external_id"))
-        or _optional_str(metadata.get("collection_id"))
-        or "document"
-    )
-    if section:
-        locator = f"section:{section}"
-    elif isinstance(page, int):
-        locator = f"page:{page}"
-    else:
-        locator = None
-    return Citation(
-        label=label,
-        source_uri=_optional_str(metadata.get("source_uri")),
-        locator=locator,
-        page=page,
-        page_end=page_end,
-        section=section,
-        section_ref=section_ref,
         section_path=section_path,
     )
 
@@ -356,37 +269,6 @@ def _public_section_provenance(
 
 def _page_number(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
-def _optional_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _parse_updated_at(metadata: dict[str, Any]) -> datetime | None:
-    value = metadata.get("updated_at")
-    if value is None:
-        value = metadata.get("updated_at_ts")
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return _ensure_tz(value)
-    if isinstance(value, (int, float)):
-        try:
-            return datetime.fromtimestamp(value, tz=UTC)
-        except (OverflowError, OSError, ValueError):
-            return None
-    if isinstance(value, str):
-        text = value.strip()
-        if text.endswith("Z"):
-            text = f"{text[:-1]}+00:00"
-        try:
-            return _ensure_tz(datetime.fromisoformat(text))
-        except ValueError:
-            return None
-    return None
 
 
 def _ensure_tz(value: datetime) -> datetime:

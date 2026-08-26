@@ -1,5 +1,7 @@
 """Current-source outline and exhaustive scan operations."""
 
+from uuid import UUID
+
 from app.config import Settings
 from app.cursors import InvalidScanCursorError, ScanCursor, ScanCursorCodec
 from app.models import (
@@ -9,6 +11,7 @@ from app.models import (
     SourceOutlineResponse,
     SourceOutlineSection,
 )
+from app.passages import passage_groups
 from app.references import section_reference, source_revision_marker
 from app.repository import DocumentOutlineRecord, DocumentRecord, Repository
 from app.representation import DocumentBlock, DocumentSection
@@ -52,7 +55,7 @@ async def get_source_outline(
 async def scan_source(
     repository: Repository, request: ScanRequest, settings: Settings
 ) -> ScanResponse | None:
-    """Return one deterministic, byte-bounded page of canonical blocks."""
+    """Return one deterministic, byte-bounded page of source passages."""
     limit = request.limit or settings.default_scan_limit
     if limit > settings.max_scan_limit:
         raise ScanLimitError(
@@ -83,21 +86,33 @@ async def scan_source(
         return None
 
     section_by_id = {section.section_id: section for section in record.sections}
-    items: list[ScanItem] = []
+    selected_blocks: list[DocumentBlock] = []
     payload_bytes = 0
     for block in record.blocks:
         text = block.rendered_text
         block_bytes = len(text.encode("utf-8"))
-        if items and payload_bytes + block_bytes > settings.max_scan_payload_bytes:
+        separator_bytes = 2 if selected_blocks else 0
+        if (
+            selected_blocks
+            and payload_bytes + separator_bytes + block_bytes
+            > settings.max_scan_payload_bytes
+        ):
             break
         if block_bytes > settings.max_scan_payload_bytes:
             raise RuntimeError("A canonical block exceeds the scan payload limit.")
-        items.append(
-            _scan_item(record.document, block, section_by_id[block.section_id])
-        )
-        payload_bytes += block_bytes
+        selected_blocks.append(block)
+        payload_bytes += separator_bytes + block_bytes
 
-    has_more = record.has_more or len(items) < len(record.blocks)
+    groups = passage_groups(
+        selected_blocks,
+        text_of=lambda block: block.rendered_text,
+        target_tokens=settings.chunk_size,
+    )
+    items = [
+        _scan_item(record.document, group, section_by_id) for group in groups
+    ]
+
+    has_more = record.has_more or len(selected_blocks) < len(record.blocks)
     next_cursor = None
     if has_more:
         if not items:
@@ -113,7 +128,7 @@ async def scan_source(
                     record.document.checksum, revision_id
                 ),
                 section_ref=request.section_ref,
-                after_ordinal=record.blocks[len(items) - 1].ordinal,
+                after_ordinal=selected_blocks[-1].ordinal,
             )
         )
     return ScanResponse(
@@ -158,15 +173,21 @@ def _outline_section(
 
 def _scan_item(
     document: DocumentRecord,
-    block: DocumentBlock,
-    section: DocumentSection,
+    blocks: tuple[DocumentBlock, ...],
+    section_by_id: dict[UUID, DocumentSection],
 ) -> ScanItem:
-    fields: dict[str, object] = {"text": block.rendered_text}
-    if not section.is_root:
+    fields: dict[str, object] = {
+        "text": "\n\n".join(block.rendered_text for block in blocks)
+    }
+    sections = {block.section_id for block in blocks}
+    section = section_by_id[next(iter(sections))] if len(sections) == 1 else None
+    if section is not None and not section.is_root:
         fields["section_ref"] = _section_reference(document, section)
         fields["section_path"] = list(section.path)
-    if block.page_start is not None:
-        fields["page_start"] = block.page_start
-    if block.page_end is not None:
-        fields["page_end"] = block.page_end
+    page_starts = [block.page_start for block in blocks if block.page_start is not None]
+    page_ends = [block.page_end for block in blocks if block.page_end is not None]
+    if page_starts:
+        fields["page_start"] = min(page_starts)
+    if page_ends:
+        fields["page_end"] = max(page_ends)
     return ScanItem(**fields)

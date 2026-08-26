@@ -17,8 +17,8 @@ Start from [`seshat.example.toml`](../seshat.example.toml).
 | `embedding.model` | required | Embedding model, or provider deployment name. |
 | `embedding.dimension` | required | Embedding dimension requested from the provider. |
 | `embedding.batch_size` | `64` | Texts sent per embedding request. |
-| `chunking.size` | `800` | Target chunk size in tokens. |
-| `chunking.overlap` | `120` | Tokens shared between neighboring chunks. Must be smaller than `chunking.size`. |
+| `chunking.size` | `800` | Target search and scan passage size in tokens. |
+| `chunking.overlap` | `120` | Tokens shared between splits of oversized content. Must be smaller than `chunking.size`. |
 | `retrieval.mode` | `"hybrid"` | `hybrid` combines vector and keyword search; `vector` uses vector search alone. |
 | `retrieval.default_top_k` | `8` | Results returned when a search omits `top_k`. |
 | `retrieval.max_top_k` | `50` | Largest `top_k` a search may request. Must be at least `retrieval.default_top_k`. |

@@ -132,7 +132,7 @@ def test_scan_cursor_accepts_the_largest_encoded_external_id() -> None:
     assert codec.decode(request.cursor or "").external_id == external_id
 
 
-async def test_whole_source_scan_returns_every_block_once_in_order(
+async def test_whole_source_scan_returns_all_content_once_in_packed_passages(
     client: AsyncClient,
     repository: InMemoryRepository,
 ) -> None:
@@ -166,7 +166,7 @@ async def test_whole_source_scan_returns_every_block_once_in_order(
         assert cursor.startswith("scan1_")
         assert EXTERNAL_ID not in cursor
 
-    assert returned == texts
+    assert "\n\n".join(returned) == "\n\n".join(texts)
 
 
 async def test_section_scan_includes_its_nested_subsections(
@@ -223,15 +223,12 @@ async def test_section_scan_includes_its_nested_subsections(
     response.raise_for_status()
     body = response.json()
     assert [item["text"] for item in body["items"]] == [
-        "General maintenance",
-        "Battery procedure",
+        "General maintenance\n\nBattery procedure"
     ]
-    assert [item["section_path"] for item in body["items"]] == [
-        ["Maintenance"],
-        ["Maintenance", "Battery"],
-    ]
-    assert body["items"][1]["page_start"] == 3
-    assert body["items"][1]["page_end"] == 4
+    assert "section_ref" not in body["items"][0]
+    assert "section_path" not in body["items"][0]
+    assert body["items"][0]["page_start"] == 2
+    assert body["items"][0]["page_end"] == 4
     assert body["next_cursor"] is None
 
 
@@ -267,6 +264,67 @@ async def test_scan_renders_table_context_without_exposing_table_fields(
         "Power module diagnostics\n| Code | Meaning |\n| --- | --- |\n| 310 | Low voltage |"
     )
     assert set(item) == {"text", "section_ref", "section_path"}
+
+
+async def test_scan_packs_sparse_converter_fragments_with_their_table(
+    client: AsyncClient,
+    repository: InMemoryRepository,
+) -> None:
+    seed_source(
+        repository,
+        (
+            CanonicalBlock(
+                ordinal=0, kind="text", text="21", page_start=149, page_end=149
+            ),
+            CanonicalBlock(
+                ordinal=1, kind="text", text="3", page_start=149, page_end=149
+            ),
+            CanonicalBlock(
+                ordinal=2,
+                kind="text",
+                text="Technical error code",
+                section_path=("Technical error code",),
+                page_start=149,
+                page_end=149,
+            ),
+            CanonicalBlock(
+                ordinal=3,
+                kind="table_part",
+                text="| 81 | Replace the flow sensor. |",
+                section_path=("Technical error code",),
+                table_header="| Code | Action |\n| --- | --- |",
+                page_start=149,
+                page_end=149,
+            ),
+            CanonicalBlock(
+                ordinal=4,
+                kind="text",
+                text="Run the complete checkout procedure after replacement.",
+                section_path=("Verification",),
+                page_start=150,
+                page_end=150,
+            ),
+        ),
+    )
+
+    response = await scan(
+        client,
+        {"collection_id": COLLECTION, "external_id": EXTERNAL_ID, "limit": 20},
+    )
+
+    response.raise_for_status()
+    assert response.json()["items"] == [
+        {
+            "text": (
+                "21\n\n3\n\nTechnical error code\n\n"
+                "| Code | Action |\n| --- | --- |\n"
+                "| 81 | Replace the flow sensor. |\n\n"
+                "Run the complete checkout procedure after replacement."
+            ),
+            "page_start": 149,
+            "page_end": 150,
+        }
+    ]
 
 
 async def test_scan_payload_bound_defers_whole_blocks(

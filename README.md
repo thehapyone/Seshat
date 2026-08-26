@@ -1,8 +1,8 @@
 # Seshat
 
 Seshat is the document and retrieval engine for your AI agents. Give it files
-or application data, then ask it for grounded passages and citations your agent
-can use to answer with confidence.
+or application data, then ask it for grounded passages your agent can use to
+answer with confidence.
 
 ```mermaid
 flowchart LR
@@ -10,7 +10,7 @@ flowchart LR
     Seshat -->|convert| Docling[Docling]
     Seshat -->|index| Store[(PostgreSQL + pgvector)]
     Agent[Your AI agent] -->|search a collection| Seshat
-    Seshat -->|passages + citations| Agent
+    Seshat -->|passages + provenance| Agent
 ```
 
 ## Capabilities
@@ -18,9 +18,10 @@ flowchart LR
 - Ingest application data, crawler output, exports, and custom integrations as text.
 - Upload PDF, Word, PowerPoint, Excel, HTML, text, and Markdown files.
 - Search isolated collections with hybrid or vector retrieval.
-- Return passages with caller-owned source identity, page citations, and
+- Return passages with caller-owned source identity, page location, and
   scan-ready section references when available.
-- Inspect recognized source structure and traverse every canonical block in order.
+- Inspect recognized source structure and traverse substantive source passages
+  in order.
 - Keep originals available to authenticated applications and viewers.
 
 ## Get Running

@@ -227,47 +227,20 @@ class SearchRequest(BaseModel):
     filters: SearchFilters | None = None
 
 
-class Citation(BaseModel):
-    label: str
-    source_uri: str | None = None
-    locator: str | None = None
-    page: int | None = None
-    page_end: int | None = None
-    section: str | None = None
-    section_ref: SectionReference | None = None
-    section_path: list[str] | None = None
-
-
 class SearchResultItem(BaseModel):
     text: str
     score: float
-    retrieval_score: float | None = None
     collection_id: str
     external_id: str | None = None
     title: str | None = None
-    source_type: str | None = None
-    source_uri: str | None = None
-    version: str | None = None
-    checksum: str | None = None
     page: int | None = None
     page_end: int | None = None
-    section: str | None = None
     section_ref: SectionReference | None = None
     section_path: list[str] | None = None
-    updated_at: datetime | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    citations: list[Citation] = Field(default_factory=list)
-
-
-class SearchStats(BaseModel):
-    retrieved: int = Field(ge=0)
-    returned: int = Field(ge=0)
 
 
 class SearchResponse(BaseModel):
     items: list[SearchResultItem]
-    warnings: list[str] = Field(default_factory=list)
-    stats: SearchStats
 
 
 class HealthResponse(BaseModel):
