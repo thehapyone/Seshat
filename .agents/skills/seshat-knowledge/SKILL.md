@@ -141,11 +141,12 @@ First read `GET /v1/documents/source` for the metadata:
 
 ## Choose the retrieval capability
 
-| Need                                     | Seshat capability    | Caller responsibility                     |
-| ---------------------------------------- | -------------------- | ----------------------------------------- |
-| Focused fact or known target             | `search`             | Judge and retain candidates               |
-| Recognized source structure              | `outline`            | Treat `null` as unavailable, not zero     |
-| Complete source, section, list, or count | `scan` to completion | Extract, deduplicate, count, or summarize |
+| Need                                 | Seshat capability                 | Caller responsibility                              |
+| ------------------------------------ | --------------------------------- | -------------------------------------------------- |
+| Focused fact or known target         | `search`                          | Judge and retain candidates                        |
+| Recognized source structure          | `outline`                         | Treat `null` as unavailable, not zero              |
+| Complete source or one section scope | `scan` to a null cursor           | Process every ordered item in that scope           |
+| Exhaustive topic, list, or count      | `outline`, then relevant `scan`s  | Establish the topic span, extract, deduplicate, count |
 
 Search is ranked and incomplete. Increasing `top_k` does not establish
 coverage. Outline reports converter-recognized facts only. Use scan when the
@@ -193,6 +194,13 @@ Request `/v1/documents/source/outline` for one source when recognized structure
 can narrow the task. Use a returned `section_ref` unchanged. If structure is
 unavailable or too coarse, scan the whole source.
 
+```bash
+curl -sS -G "$SESHAT_URL/v1/documents/source/outline" \
+  -H "Authorization: Bearer $SESHAT_API_TOKEN" \
+  --data-urlencode "collection_id=manuals" \
+  --data-urlencode "external_id=equipment-handbook"
+```
+
 ```json
 {
   "collection_id": "manuals",
@@ -213,6 +221,15 @@ unavailable or too coarse, scan the whole source.
 Counts are `null` when the converter could not establish them; zero means it
 established that none were present. An outline without sections includes a
 `reason` field.
+
+For an exhaustive topic, list, or exact count, first establish the topic's full
+span from outline order, page ranges, headings, and repeated table headers. A
+converter-recognized section can be narrower than the topic a person names. For
+example, a table heading can be in one section while its rows continue through
+adjacent sections named `Description`, `Additional information`, or
+`Recommended action`. Treat such neighboring scopes as candidates until the
+next clearly unrelated heading. If the outline cannot establish reliable
+boundaries, scan the whole source instead.
 
 ```bash
 curl -sS -X POST "$SESHAT_URL/v1/scan" \
@@ -249,6 +266,18 @@ Retain only the caller state required for the task and repeat with `next_cursor`
 in the same source and optional section scope. Traversal is complete only when
 `next_cursor` is `null`. On `source_changed`, discard the partial traversal and
 restart.
+
+A null cursor completes only the requested source or `section_ref` scope. It
+does not prove that the user's broader topic is complete. For exhaustive work:
+
+1. Scan every outline scope identified as part of the topic, following each
+   scope's cursor to `null`.
+2. Extract values from the requested table column or record field rather than
+   nearby identifiers, footnotes, or nested error numbers.
+3. Preserve source order, deduplicate by the requested domain key, and inspect
+   opening and closing fragments for rows split across passages or sections.
+4. If the result is implausibly short, recheck the outline and adjacent scopes
+   before claiming a count or complete list.
 
 Knowledge errors use a machine-readable code:
 
